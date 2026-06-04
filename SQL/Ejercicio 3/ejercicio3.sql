@@ -158,10 +158,29 @@ SELECT COUNT(nom) AS cursos_registrados FROM curso;
 SELECT COUNT(DISTINCT i.nom) AS cursos_con_inscriptos FROM insc i;
     -- Se usa DISTINCT para evitar repetidos en un mismo curso.
 
+    -- Alternativa:
+    SELECT COUNT(*) AS cursos_con_inscriptos FROM (
+        -- Se cuentan las filas en cursos y el resultado se guarda en cursos_con_inscriptos.
+        SELECT nom FROM insc
+        GROUP BY nom -- Agrupa filas con el MISMO NOMBRE de curso.
+    ) cursos; -- Quiere decir que es una TABLA TEMPORAL llamada cursos.
+
 -- 6. Nota máxima obtenida en el curso ’Python I‘.
 
 SELECT MAX(i.nota) FROM insc i
 WHERE i.nom = 'Python I';
+
+    -- Alternativa:
+    SELECT i.nota FROM insc i
+    WHERE i.nom = 'Python' AND i.nota >= ALL (
+        SELECT i2.nota FROM insc i2 WHERE i2.nom = 'Python I'
+    );
+
+    -- ALternativa sin MAX ni ALL:
+    SELECT i.nota FROM insc i
+    WHERE i.nom = 'Python I'
+    ORDER BY i.nota DESC
+    LIMIT 1; -- Se ordenan las notas de mayor a menor y se toma la primera.
 
 -- 7. Nombre de los cursos registrados, ordenados ascendentemente por nombre.
 
@@ -186,11 +205,27 @@ SELECT * FROM curso
 WHERE cH > (SELECT cH FROM curso WHERE nom = 'Kotlin I')
 ORDER BY cH DESC;
 
+    -- Alternativa (SELF JOIN):
+    SELECT c1.* FROM curso c1 -- Curso que se quiere mostrar (solo c1).
+    JOIN curso c2 ON c2.nom = 'Kotlin I' 
+        -- Se toma únicamente el registro cuyo nombre sea Kotlin I (curso de referencia).
+        -- Después del JOIN cada fila de c1 se combina con esa única fila de c2.
+    WHERE c1.cH > c2.CH -- Se compara cada curso con Kotlin I.
+    ORDER BY c1.cH DESC;
+
 -- 11. Nombre del curso que tiene una carga horaria superior a la de todos los cursos que dicta el profesor “pedroibañez@yahoo.com.ar”.
 
 SELECT nom FROM curso
-WHERE cH > 
-    (SELECT MAX(c.cH) FROM curso c
+WHERE cH > (
+    SELECT MAX(c.cH) FROM curso c
+    JOIN dicta d ON c.nom = d.nom
+    WHERE d.correo = 'pedroibañez@yahoo.com.ar'
+    );
+
+    -- Alternativa con ALL:
+    SELECT nom FROM curso
+    WHERE cH > ALL (
+        SELECT c.cH FROM curso c
         JOIN dicta d ON c.nom = d.nom
         WHERE d.correo = 'pedroibañez@yahoo.com.ar'
     );
@@ -202,6 +237,10 @@ WHERE nombre LIKE 'Rosa%';
     -- Como el nombre se guarda con el apellido en el mismo campo, LIKE permite que empiece con 'Rosa' y termine con lo que sea.
     -- LIKE 'Rosa%' -> Empieza con Rosa.
     -- LIKE '%Rosa%' -> Contiene Rosa en cualquier parte.
+
+    -- Alternativa:
+    SELECT * FROM pers
+    WHERE LEFT(nombre, 4) = 'Rosa'; -- Compara los primeros 4 caracteres del nombre.
 
 -- 13. Cursos (nombre) junto a los datos del docente que los dicta.
 
@@ -222,8 +261,18 @@ LEFT JOIN pers p ON i.correo = p.correo;
 -- 15. Docentes (correo) que dictan el curso Python I y/o Python II.
 
 SELECT correo FROM dicta
-WHERE nom = 'Python I' OR nom = 'Python II';
-    -- También puede ser WHERE nom IN ('Python I', 'Python II').
+WHERE nom = 'Python I' OR nom = 'Python II';    -- Varias condiciones.
+    
+    -- Alternativa con IN:
+    SELECT correo FROM dicta
+    WHERE nom IN ('Python I', 'Python II');     -- Varias condiciones de forma compacta.
+
+    -- Alternativa con UNION:
+    SELECT correo FROM dicta
+    WHERE nom = 'Python I' UNION (              -- Unión de conjuntos.
+        SELECT correo FROM dicta
+        WHERE nom = 'Python II'
+    );
 
 -- 16. Docentes (correo) que dictan los cursos Python I y Python II.
 
@@ -232,70 +281,76 @@ WHERE nom = 'Python I' INTERSECT (
     SELECT correo FROM dicta WHERE nom = 'Python II'
     );
 
+    -- Alternativa con GROUP BY e IN:
+    SELECT correo FROM dicta
+    WHERE nom IN ('Python I', 'Python II')
+    GROUP BY correo
+    HAVING COUNT(DISTINCT nom) = 2;
+        -- HAVING COUNT filtra los grupos formados por cada docente, conservando únicamente aquellos que dictan AMBOS CURSOS.
+        -- Esto significa que si un docente sólo dicta Python I o sólo Python II, la cantidad de cursos distintos será 1 y no será incluido en el resultado (por eso se coloca que la cantidad de cursos distintos es igual a 2).
+
 -- 17. Docentes (todos los datos) que cursaron algún curso de verano.
 
-SELECT * FROM pers p
+SELECT p.* FROM pers p
 JOIN dicta d ON d.correo = p.correo INTERSECT ( -- Docentes
-    SELECT * FROM pers p2
+    SELECT p2.* FROM pers p2
     JOIN insc i ON p2.correo = i.correo         -- Alumnos
     );
     -- En esta versión se consideran los docentes que también son alumnos.
-    -- Elimina duplicados automáticamente.
-
-SELECT DISTINCT * FROM pers p
-JOIN dicta d ON p.correo = d.correo
-JOIN insc i ON p.correo = i.correo;
-    -- Puede generar duplicados por múltiples inscripciones o múltiples cursos dictados, por eso se usa DISTINCT.
+    -- INTERSECT elimina duplicados automáticamente.
+    
+    -- Alternativa SIN INTERSECT
+    SELECT DISTINCT p.* FROM pers p
+    JOIN dicta d ON p.correo = d.correo
+    JOIN insc i ON p.correo = i.correo;
+        -- Puede generar duplicados por múltiples inscripciones o múltiples cursos dictados, por eso se usa DISTINCT.
 
 -- 18. Alumnos (correo) que se inscribieron en más de un curso de verano.
 
+SELECT correo FROM insc
+GROUP BY correo
+HAVING COUNT(nom) > 1;
+    -- El DISTINCT no es necesario porque la clave primaria (correo, nom) impide que un alumno se inscriba más de una vez al mismo curso (por lo que no se repite el correo para un mismo curso).
+
+    -- Alternativa con SELF JOIN:
+    SELECT DISTINCT i1.correo FROM insc i1
+    JOIN insc i2 ON i1.correo = i2.correo AND i1.nom <> i2.nom;
+        -- Para un mismo correo inscripto, existen nombres de cursos distintos.
+
 -- 19. Docentes (todos los datos) que dictan más de un curso cuya carga horaria sea inferior a 30 horas reloj.
+
+SELECT p.* FROM pers p
+JOIN dicta d ON p.correo = d.correo
+JOIN curso c ON d.nom = c.nom
+WHERE cH < 30
+GROUP BY p.*
+HAVING COUNT(*) > 1;
+    -- COUNT(*) cuenta filas.
+    -- COUNT(c.nom) cuenta valores NO NULL de c.nom. Como nom es la clave primaria de curso, NUNCA ES NULL en esas filas, por lo que se puede usar (*).
+
+    -- Alternativa con subconsulta:
+    SELECT p.* FROM pers p
+    WHERE (
+        SELECT COUNT(*) FROM dicta d
+        JOIN curso c ON d.nom = c.nom
+        WHERE d.correo = p.correo AND c.cH < 30
+    ) > 1;
+        -- Devuelve la cantidad de filas en dicta donde coincide el correo con la persona (es docente) y el curso con el que coincide el nombre tiene carga horaria menor a 30hs. Ese resultado debe ser mayor a 1.
 
 -- 20. Pares de alumnos (todos los datos) que cursaron algún curso en común. 
 
--- TABLAS VIRTUALES/VISTAS de SQL
--- 24. Especifique la Vista “cursosCortos” que tenga los siguientes atributos nombre, carga horaria. Los cursos cortos son aquellos cuya carga horaria es inferior a las 40 horas.
+SELECT p1.*, p2.*, i1.nom AS curso_comun FROM insc i1 -- Opcional para ver el curso.
+JOIN insc i2 ON i1.nom = i2.nom AND i1.correo < i2.correo
+JOIN pers p1 ON p1.correo = i1.correo
+JOIN pers p2 ON p2.correo = i2.correo;
+    -- Se usa < y no <> para evitar duplicados simétricos. Con < solo una de las combinaciones es verdadera y se descarta la otra, de lo contrario aparecerían ambos pares: (A,B) y (B, A).
+    -- Es una técnica común para generar combinaciones de pares sin repetición.
 
--- 25. Muestre los datos contenidos en la vista, ordenados según el nombre.
-
--- 26. Inserte el curso “DBA PostgreSQL” con una carga horaria de 50 horas, a través de la vista.
-
--- 27. Especifique la Vista “cursosCortosCO” idem a la anterior, pero agregando la especificación “WITH CHECK OPTION ”.
-
--- 28. Inserte el curso “DBA Oracle” con una carga horaria de 55 horas, a través de la vista.
-
--- 29. Especifique la Vista “alumnosPython1” que tenga los siguientes atributos correo, nombre de usuario, nombre y representan a los alumnos que se inscribieron en el curso “PYTHON I”.
-
--- 30. Muestre los datos contenidos en la vista creada en el punto anterior, cuyo correo sea una cuenta de Gmail.
-
--- 31. Especifique la Vista “alumnosPython2” que tenga los siguientes atributos nombre de usuario, nombre y representan a los alumnos que se inscribieron en el curso “PYTHON II”.
-
--- 32. Muestre los datos contenidos en la vista.
-
--- 33. Inserte un nuevo alumno con los siguientes datos: < orm@gmail.com, or, Orlando Martin >
-
--- GESTIÓN DE USUARIOS
--- 34. Cree el usuario “alumno” con contraseña “alumno1”.
-
--- 35. Cambie su contraseña, por “alumno”.
-
--- 36. Concédale el permiso de SELECT e INSERT sobre la tabla CURSO.
-
--- 37. A través de una consulta al catálogo del sistema, visualice los permisos del usuario “alumno”.
-
--- 38. Acceda con el usuario mencionado en el punto anterior (debe generar una nueva instancia que referencie al mismo servidor, pero con el usuario “alumno”), ejecute un SELECT sobre la tabla CURSO y luego, sobre la tabla DICTA. Analice las respuestas.
-
--- 39. Elimine el permiso SELECT sobre la tabla DICTA.
-
--- 40. Visualice nuevamente los permisos del usuario “alumno”. 
-
--- CONSULTAS AL CATÁLOGO
--- 41. Muestre los datos de las bases de datos creadas.
-
--- 42. Muestre las tablas de la base de datos actual.
-
--- 43. Muestre las columnas e índices de una tabla.
-
--- 44. Muestra los usuarios conectados.
-
--- 45. Muestre el tamaño que ocupa la tabla DICTA.
+    -- Alternativa con EXISTS:
+    SELECT p1.*, p2.* FROM pers p1
+    JOIN pers p2 ON p1.correo < p2.correo
+    WHERE EXISTS (
+        SELECT * FROM insc i1
+        JOIN insc i2 ON i1.nom = i2.nom
+        WHERE i1.correo = p1.correo AND i2.correo = p2.correo
+    );
